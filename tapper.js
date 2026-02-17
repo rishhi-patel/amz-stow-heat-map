@@ -1,159 +1,188 @@
 // ==UserScript==
-// @name         Workflow Auto Runner (Next + Refresh)
-// @namespace    local-automation
-// @version      1.0.0
-// @match        https://www.cognitoforms.com/HATCHBlue1/BlueCatalystApplications2026
+// @name         Cognito Form Bot (Role per Tab via sessionStorage)
+// @namespace    https://exocodelabs.tech/
+// @version      1.0
+// @description  Same script in multiple tabs; each tab chooses its own role using sessionStorage.
+// @match        https://YOUR-DOMAIN-HERE/*
 // @grant        none
 // ==/UserScript==
 
-;(() => {
+;(function () {
   "use strict"
 
+  /***********************
+   * CONFIG
+   ***********************/
   const CONFIG = {
-    debug: true,
-    defaultTimeoutMs: 15000,
+    ROLE_KEY: "tm_role", // per-tab role
+    nextButtonSelector: "button[data-next].cog-button--next",
+    refreshDelayMs: 5000,
+    pollIntervalMs: 200,
+    stepTimeoutMs: 30000,
   }
 
-  // Edit this list to add/remove actions
-  const WORKFLOW = [
-    { type: "click", selector: "button[data-next], button.cog-button--next" },
-    { type: "wait", ms: 5000 },
-    { type: "reload" },
-  ]
-
+  /***********************
+   * UTILS
+   ***********************/
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-  const log = (...args) => {
-    if (CONFIG.debug) console.log("[auto-workflow]", ...args)
+  async function waitFor(
+    predicateFn,
+    timeoutMs = CONFIG.stepTimeoutMs,
+    intervalMs = CONFIG.pollIntervalMs,
+  ) {
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      const val = predicateFn()
+      if (val) return val
+      await sleep(intervalMs)
+    }
+    throw new Error("Timeout waiting for condition.")
   }
 
-  const isVisible = (el) => {
+  function isVisible(el) {
     if (!el) return false
-    const s = window.getComputedStyle(el)
-    const r = el.getBoundingClientRect()
-    return (
-      s.display !== "none" &&
-      s.visibility !== "hidden" &&
-      +s.opacity > 0 &&
-      r.width > 0 &&
-      r.height > 0
+    const style = getComputedStyle(el)
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.opacity === "0"
+    )
+      return false
+    const rect = el.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0
+  }
+
+  function isClickable(el) {
+    if (!el) return false
+    if (el.disabled) return false
+    if (el.getAttribute("aria-disabled") === "true") return false
+    if (el.classList.contains("is-disabled")) return false
+    return isVisible(el)
+  }
+
+  function humanClick(el) {
+    const rect = el.getBoundingClientRect()
+    const clientX = rect.left + rect.width / 2
+    const clientY = rect.top + rect.height / 2
+
+    ;["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(
+      (type) => {
+        el.dispatchEvent(
+          new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            clientX,
+            clientY,
+          }),
+        )
+      },
     )
   }
 
-  async function waitForSelector(
-    selector,
-    timeoutMs = CONFIG.defaultTimeoutMs,
-  ) {
-    const start = Date.now()
-    while (Date.now() - start < timeoutMs) {
-      const nodes = [...document.querySelectorAll(selector)]
-      const el = nodes.find((n) => isVisible(n) && !n.disabled)
-      if (el) return el
-      await sleep(200)
+  /***********************
+   * ROLE HANDLING (PER TAB)
+   ***********************/
+  function normalizeRole(raw) {
+    const r = (raw || "").trim().toLowerCase()
+    if (["h", "heat", "heatmap"].includes(r)) return "heatmap"
+    if (["a", "avail", "available"].includes(r)) return "available"
+    return ""
+  }
+
+  function getRole() {
+    return sessionStorage.getItem(CONFIG.ROLE_KEY) || ""
+  }
+
+  function setRole(role) {
+    sessionStorage.setItem(CONFIG.ROLE_KEY, role)
+    updateBadge(role)
+    console.log("[TM] Role set to:", role)
+  }
+
+  function ensureRole() {
+    let role = normalizeRole(getRole())
+    if (!role) {
+      role = normalizeRole(
+        prompt("Set role for THIS TAB: heatmap / available", "heatmap"),
+      )
+      if (!role) throw new Error("No valid role set; stopping.")
+      setRole(role)
     }
-    throw new Error(`Timeout waiting for selector: ${selector}`)
+    return role
   }
 
-  async function clickSelector(selector, timeoutMs) {
-    const el = await waitForSelector(selector, timeoutMs)
-    el.scrollIntoView({ block: "center", inline: "center" })
-    el.click()
-    log("clicked", selector)
-  }
-
-  async function clickText(
-    selector,
-    text,
-    timeoutMs = CONFIG.defaultTimeoutMs,
-  ) {
-    const start = Date.now()
-    const wanted = text.trim().toLowerCase()
-
-    while (Date.now() - start < timeoutMs) {
-      const nodes = [...document.querySelectorAll(selector)]
-      const el = nodes.find((n) => {
-        if (!isVisible(n) || n.disabled) return false
-        const t = (n.textContent || n.innerText || "").trim().toLowerCase()
-        return t === wanted || t.includes(wanted)
-      })
-
-      if (el) {
-        el.scrollIntoView({ block: "center", inline: "center" })
-        el.click()
-        log("clicked by text", selector, text)
-        return
-      }
-
-      await sleep(200)
-    }
-
-    throw new Error(`Timeout waiting text "${text}" in selector: ${selector}`)
-  }
-
-  async function fillInput(selector, value, timeoutMs) {
-    const el = await waitForSelector(selector, timeoutMs)
-    el.focus()
-    el.value = value
-    el.dispatchEvent(new Event("input", { bubbles: true }))
-    el.dispatchEvent(new Event("change", { bubbles: true }))
-    log("filled", selector, value)
-  }
-
-  async function runStep(step) {
-    switch (step.type) {
-      case "wait":
-        await sleep(step.ms || 0)
-        return
-
-      case "click":
-        await clickSelector(step.selector, step.timeoutMs)
-        return
-
-      case "clickText":
-        await clickText(step.selector, step.text, step.timeoutMs)
-        return
-
-      case "fill":
-        await fillInput(step.selector, step.value ?? "", step.timeoutMs)
-        return
-
-      case "reload":
-        if (step.delayMs) await sleep(step.delayMs)
-        log("reloading page")
-        location.reload()
-        return
-
-      case "run":
-        if (typeof step.fn === "function") await step.fn()
-        return
-
-      default:
-        throw new Error(`Unknown step type: ${step.type}`)
-    }
-  }
-
-  async function runWorkflow() {
-    try {
-      for (const step of WORKFLOW) {
-        await runStep(step)
-      }
-    } catch (err) {
-      console.error("[auto-workflow] failed:", err)
-    }
-  }
-
-  // avoid duplicate run in same page lifecycle
-  if (window.__AUTO_WORKFLOW_RUNNING__) return
-  window.__AUTO_WORKFLOW_RUNNING__ = true
-
-  if (
-    document.readyState === "complete" ||
-    document.readyState === "interactive"
-  ) {
-    void runWorkflow()
-  } else {
-    window.addEventListener("DOMContentLoaded", () => void runWorkflow(), {
-      once: true,
+  function installRoleHotkeys() {
+    window.addEventListener("keydown", (e) => {
+      if (!e.altKey) return
+      if (e.key.toLowerCase() === "h") setRole("heatmap")
+      if (e.key.toLowerCase() === "a") setRole("available")
     })
   }
+
+  function updateBadge(role) {
+    const id = "tm-role-badge"
+    let el = document.getElementById(id)
+    if (!el) {
+      el = document.createElement("div")
+      el.id = id
+      el.style.cssText = `
+        position: fixed; z-index: 999999;
+        top: 10px; right: 10px;
+        padding: 6px 10px;
+        font: 12px/1.2 -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial;
+        border-radius: 8px;
+        background: rgba(0,0,0,0.75);
+        color: #fff;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+      `
+      document.documentElement.appendChild(el)
+    }
+    el.textContent = `TM Role: ${role || "unset"}  (Alt+H / Alt+A)`
+  }
+
+  /***********************
+   * ROLE-SPECIFIC LOGIC
+   ***********************/
+  async function runHeatmap() {
+    // Example placeholder:
+    // If heatmap tab should NOT click/refresh, keep it passive.
+    console.log("[TM] Heatmap role running (passive by default).")
+
+    // Put your heatmap-only steps here (e.g., scrape DOM, log values, etc.)
+  }
+
+  async function runAvailable() {
+    console.log("[TM] Available role running (active click+refresh loop).")
+
+    while (true) {
+      const btn = await waitFor(() => {
+        const el = document.querySelector(CONFIG.nextButtonSelector)
+        return isClickable(el) ? el : null
+      })
+
+      humanClick(btn)
+      await sleep(CONFIG.refreshDelayMs)
+      location.reload()
+
+      // reload interrupts execution; this line won't execute in practice
+      await sleep(1e9)
+    }
+  }
+
+  /***********************
+   * BOOTSTRAP
+   ***********************/
+  ;(async function main() {
+    installRoleHotkeys()
+
+    const role = ensureRole()
+    updateBadge(role)
+
+    if (role === "heatmap") return runHeatmap()
+    if (role === "available") return runAvailable()
+
+    throw new Error("Unexpected role: " + role)
+  })().catch((e) => console.error("[TM] Error:", e))
 })()
