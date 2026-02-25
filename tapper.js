@@ -1,9 +1,8 @@
 // ==UserScript==
-// @name         Cognito Form Bot (Role per Tab via sessionStorage)
-// @namespace    https://exocodelabs.tech/
-// @version      1.0
-// @description  Same script in multiple tabs; each tab chooses its own role using sessionStorage.
-// @match        https://YOUR-DOMAIN-HERE/*
+// @name         Workflow Auto Runner
+// @namespace    local-automation
+// @version      1.2.0
+// @match        https://www.cognitoforms.com/HATCHBlue1/BlueCatalystApplications2026
 // @grant        none
 // ==/UserScript==
 
@@ -14,17 +13,22 @@
    * CONFIG
    ***********************/
   const CONFIG = {
-    ROLE_KEY: "tm_role", // per-tab role
-    nextButtonSelector: "button[data-next].cog-button--next",
-    refreshDelayMs: 5000,
-    pollIntervalMs: 200,
-    stepTimeoutMs: 30000,
+    debug: false,
+    defaultTimeoutMs: 15000,
+    pollEveryMs: 200,
+    sessionTabKey: "tab",
   }
 
-  /***********************
-   * UTILS
-   ***********************/
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const SHOW_HEAT_MAP_SELECTOR = "#show-heat-map, [id=' show-heat-map']"
+
+  const WORKFLOW = [
+    { type: "click", selector: "#submitButton button" },
+    { type: "click", selector: ".view-thumb" },
+    { type: "run", fn: () => clickTabFromSession() },
+    { type: "click", selector: SHOW_HEAT_MAP_SELECTOR },
+  ]
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
   async function waitFor(
     predicateFn,
@@ -42,147 +46,88 @@
 
   function isVisible(el) {
     if (!el) return false
-    const style = getComputedStyle(el)
-    if (
-      style.display === "none" ||
-      style.visibility === "hidden" ||
-      style.opacity === "0"
+    const style = window.getComputedStyle(el)
+    const rect = el.getBoundingClientRect()
+    return (
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      +style.opacity > 0 &&
+      rect.width > 0 &&
+      rect.height > 0
     )
       return false
     const rect = el.getBoundingClientRect()
     return rect.width > 0 && rect.height > 0
   }
 
-  function isClickable(el) {
-    if (!el) return false
-    if (el.disabled) return false
-    if (el.getAttribute("aria-disabled") === "true") return false
-    if (el.classList.contains("is-disabled")) return false
-    return isVisible(el)
-  }
+  async function waitForSelector(selector, timeoutMs = CONFIG.defaultTimeoutMs) {
+    const start = Date.now()
 
-  function humanClick(el) {
-    const rect = el.getBoundingClientRect()
-    const clientX = rect.left + rect.width / 2
-    const clientY = rect.top + rect.height / 2
-
-    ;["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(
-      (type) => {
-        el.dispatchEvent(
-          new MouseEvent(type, {
-            bubbles: true,
-            cancelable: true,
-            view: window,
-            clientX,
-            clientY,
-          }),
-        )
-      },
-    )
-  }
-
-  /***********************
-   * ROLE HANDLING (PER TAB)
-   ***********************/
-  function normalizeRole(raw) {
-    const r = (raw || "").trim().toLowerCase()
-    if (["h", "heat", "heatmap"].includes(r)) return "heatmap"
-    if (["a", "avail", "available"].includes(r)) return "available"
-    return ""
-  }
-
-  function getRole() {
-    return sessionStorage.getItem(CONFIG.ROLE_KEY) || ""
-  }
-
-  function setRole(role) {
-    sessionStorage.setItem(CONFIG.ROLE_KEY, role)
-    updateBadge(role)
-    console.log("[TM] Role set to:", role)
-  }
-
-  function ensureRole() {
-    let role = normalizeRole(getRole())
-    if (!role) {
-      role = normalizeRole(
-        prompt("Set role for THIS TAB: heatmap / available", "heatmap"),
-      )
-      if (!role) throw new Error("No valid role set; stopping.")
-      setRole(role)
+    while (Date.now() - start < timeoutMs) {
+      const elements = [...document.querySelectorAll(selector)]
+      const found = elements.find((el) => isVisible(el) && !el.disabled)
+      if (found) return found
+      await sleep(CONFIG.pollEveryMs)
     }
-    return role
+
+    throw new Error(`Timeout waiting for selector: ${selector}`)
   }
 
-  function installRoleHotkeys() {
-    window.addEventListener("keydown", (e) => {
-      if (!e.altKey) return
-      if (e.key.toLowerCase() === "h") setRole("heatmap")
-      if (e.key.toLowerCase() === "a") setRole("available")
-    })
+  async function clickSelector(selector, timeoutMs) {
+    const element = await waitForSelector(selector, timeoutMs)
+    element.scrollIntoView({ block: "center", inline: "center" })
+    element.click()
+    log("clicked", selector)
   }
 
-  function updateBadge(role) {
-    const id = "tm-role-badge"
-    let el = document.getElementById(id)
-    if (!el) {
-      el = document.createElement("div")
-      el.id = id
-      el.style.cssText = `
-        position: fixed; z-index: 999999;
-        top: 10px; right: 10px;
-        padding: 6px 10px;
-        font: 12px/1.2 -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial;
-        border-radius: 8px;
-        background: rgba(0,0,0,0.75);
-        color: #fff;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.35);
-      `
-      document.documentElement.appendChild(el)
+  async function clickTabFromSession() {
+    const rawTab = sessionStorage.getItem(CONFIG.sessionTabKey)
+    const tab = String(rawTab || "").trim()
+
+    if (!["1", "2", "3"].includes(tab)) {
+      log(`session tab key '${CONFIG.sessionTabKey}' missing/invalid`, rawTab)
+      return
     }
-    el.textContent = `TM Role: ${role || "unset"}  (Alt+H / Alt+A)`
+
+    const tabSelector = `#ui-id-${tab}`
+    await clickSelector(tabSelector)
   }
 
-  /***********************
-   * ROLE-SPECIFIC LOGIC
-   ***********************/
-  async function runHeatmap() {
-    // Example placeholder:
-    // If heatmap tab should NOT click/refresh, keep it passive.
-    console.log("[TM] Heatmap role running (passive by default).")
+  async function runStep(step) {
+    switch (step.type) {
+      case "wait":
+        await sleep(step.ms || 0)
+        break
 
-    // Put your heatmap-only steps here (e.g., scrape DOM, log values, etc.)
-  }
+      case "click":
+        await clickSelector(step.selector, step.timeoutMs)
+        break
 
-  async function runAvailable() {
-    console.log("[TM] Available role running (active click+refresh loop).")
-
-    while (true) {
-      const btn = await waitFor(() => {
-        const el = document.querySelector(CONFIG.nextButtonSelector)
-        return isClickable(el) ? el : null
-      })
-
-      humanClick(btn)
-      await sleep(CONFIG.refreshDelayMs)
-      location.reload()
+      case "run":
+        if (typeof step.fn === "function") await step.fn()
+        break
 
       // reload interrupts execution; this line won't execute in practice
       await sleep(1e9)
     }
   }
 
-  /***********************
-   * BOOTSTRAP
-   ***********************/
-  ;(async function main() {
-    installRoleHotkeys()
+  async function runWorkflow() {
+    try {
+      for (const step of WORKFLOW) {
+        await runStep(step)
+      }
+    } catch (error) {
+      console.error("[auto-workflow] failed:", error)
+    }
+  }
 
-    const role = ensureRole()
-    updateBadge(role)
+  if (window.__AUTO_WORKFLOW_RUNNING__) return
+  window.__AUTO_WORKFLOW_RUNNING__ = true
 
-    if (role === "heatmap") return runHeatmap()
-    if (role === "available") return runAvailable()
-
-    throw new Error("Unexpected role: " + role)
-  })().catch((e) => console.error("[TM] Error:", e))
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    void runWorkflow()
+  } else {
+    window.addEventListener("DOMContentLoaded", () => void runWorkflow(), { once: true })
+  }
 })()
