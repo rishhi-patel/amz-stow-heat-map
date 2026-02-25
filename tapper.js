@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Workflow Auto Runner
 // @namespace    local-automation
-// @version      1.1.0
+// @version      1.2.0
 // @match        https://www.cognitoforms.com/HATCHBlue1/BlueCatalystApplications2026
 // @grant        none
 // ==/UserScript==
@@ -13,6 +13,7 @@
     debug: false,
     defaultTimeoutMs: 15000,
     pollEveryMs: 200,
+    repeatEveryMs: 10000,
   }
 
   const WORKFLOW = [
@@ -28,6 +29,12 @@
     },
     { type: "wait", ms: 1000 },
     { type: "click", selector: "#show-heat-map" },
+    { type: "wait", ms: 1000 },
+    { type: "clickStoredId", storageKey: "ui-id-1" },
+    { type: "wait", ms: 1000 },
+    { type: "clickStoredId", storageKey: "ui-id-2" },
+    { type: "wait", ms: 1000 },
+    { type: "clickStoredId", storageKey: "ui-id-3" },
     { type: "wait", ms: 1000 },
   ]
 
@@ -79,6 +86,18 @@
     log("clicked", selector)
   }
 
+  async function clickStoredId(storageKey, timeoutMs = CONFIG.defaultTimeoutMs) {
+    const elementId = localStorage.getItem(storageKey)
+    if (!elementId) {
+      throw new Error(`Missing localStorage value for key: ${storageKey}`)
+    }
+
+    const element = await waitForSelector(`#${CSS.escape(elementId)}`, timeoutMs)
+    element.scrollIntoView({ block: "center", inline: "center" })
+    element.click()
+    log("clicked from localStorage", storageKey, elementId)
+  }
+
   async function clickText(selector, text, timeoutMs = CONFIG.defaultTimeoutMs) {
     const start = Date.now()
     const wantedText = text.trim().toLowerCase()
@@ -125,6 +144,10 @@
         await clickSelector(step.selector, step.timeoutMs)
         break
 
+      case "clickStoredId":
+        await clickStoredId(step.storageKey, step.timeoutMs)
+        break
+
       case "clickText":
         await clickText(step.selector, step.text, step.timeoutMs)
         break
@@ -150,13 +173,22 @@
     await waitForStepContent(step, "after")
   }
 
-  async function runWorkflow() {
-    try {
-      for (const step of WORKFLOW) {
-        await runStep(step)
+  async function runWorkflowCycle() {
+    for (const step of WORKFLOW) {
+      await runStep(step)
+    }
+  }
+
+  async function runWorkflowLoop() {
+    while (true) {
+      try {
+        await runWorkflowCycle()
+      } catch (error) {
+        console.error("[auto-workflow] failed:", error)
       }
-    } catch (error) {
-      console.error("[auto-workflow] failed:", error)
+
+      log(`waiting ${CONFIG.repeatEveryMs}ms before next cycle`)
+      await sleep(CONFIG.repeatEveryMs)
     }
   }
 
@@ -164,8 +196,8 @@
   window.__AUTO_WORKFLOW_RUNNING__ = true
 
   if (document.readyState === "complete" || document.readyState === "interactive") {
-    void runWorkflow()
+    void runWorkflowLoop()
   } else {
-    window.addEventListener("DOMContentLoaded", () => void runWorkflow(), { once: true })
+    window.addEventListener("DOMContentLoaded", () => void runWorkflowLoop(), { once: true })
   }
 })()
