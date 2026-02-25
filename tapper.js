@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Workflow Auto Runner
 // @namespace    local-automation
-// @version      1.3.0
+// @version      1.6.0
 // @match        https://www.cognitoforms.com/HATCHBlue1/BlueCatalystApplications2026
 // @grant        none
 // ==/UserScript==
@@ -14,7 +14,7 @@
     defaultTimeoutMs: 15000,
     pollEveryMs: 200,
     stepDelayMs: 1000,
-    sessionTabKey: "tab",
+    loopEveryMs: 10000,
   }
 
   const SHOW_HEAT_MAP_SELECTOR = "#show-heat-map, [id=' show-heat-map']"
@@ -23,7 +23,7 @@
     { type: "click", selector: "#submitButton button" },
     { type: "click", selector: ".view-thumb" },
     { type: "click", selector: SHOW_HEAT_MAP_SELECTOR },
-    { type: "run", fn: () => clickTabFromSessionOrPrompt() },
+    { type: "run", fn: () => showOtherTabs() },
   ]
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -65,29 +65,14 @@
     log("clicked", selector)
   }
 
-  function resolveTabValue() {
-    const rawTab = sessionStorage.getItem(CONFIG.sessionTabKey)
-    const tab = String(rawTab || "").trim()
+  function showOtherTabs() {
+    const tab2 = document.getElementById("ui-id-2")
+    const tab3 = document.getElementById("ui-id-3")
 
-    if (["1", "2", "3"].includes(tab)) {
-      return tab
-    }
+    if (tab2) tab2.style.display = "block"
+    if (tab3) tab3.style.display = "block"
 
-    const promptValue = window.prompt("Enter tab value (1, 2, or 3):", "1")
-    const normalized = String(promptValue || "").trim()
-
-    if (!["1", "2", "3"].includes(normalized)) {
-      throw new Error(`Invalid tab value: '${normalized || "(empty)"}'`)
-    }
-
-    sessionStorage.setItem(CONFIG.sessionTabKey, normalized)
-    return normalized
-  }
-
-  async function clickTabFromSessionOrPrompt() {
-    const tab = resolveTabValue()
-    const tabSelector = `#ui-id-${tab}`
-    await clickSelector(tabSelector)
+    log("made tabs visible", { tab2: !!tab2, tab3: !!tab3 })
   }
 
   async function runStep(step) {
@@ -118,9 +103,32 @@
   if (window.__AUTO_WORKFLOW_RUNNING__) return
   window.__AUTO_WORKFLOW_RUNNING__ = true
 
+  let isWorkflowRunning = false
+
+  async function runWorkflowThenRefresh() {
+    if (isWorkflowRunning) {
+      log("previous run still in progress, skipping this interval")
+      return
+    }
+
+    isWorkflowRunning = true
+    try {
+      await runWorkflow()
+      log("workflow complete, refreshing page soon")
+      await sleep(CONFIG.loopEveryMs)
+      window.location.reload()
+    } finally {
+      isWorkflowRunning = false
+    }
+  }
+
+  function startWorkflowLoop() {
+    void runWorkflowThenRefresh()
+  }
+
   if (document.readyState === "complete" || document.readyState === "interactive") {
-    void runWorkflow()
+    startWorkflowLoop()
   } else {
-    window.addEventListener("DOMContentLoaded", () => void runWorkflow(), { once: true })
+    window.addEventListener("DOMContentLoaded", () => startWorkflowLoop(), { once: true })
   }
 })()
