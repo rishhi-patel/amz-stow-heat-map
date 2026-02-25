@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Workflow Auto Runner (Next + Refresh)
+// @name         Workflow Auto Runner
 // @namespace    local-automation
-// @version      1.0.0
+// @version      1.1.0
 // @match        https://www.cognitoforms.com/HATCHBlue1/BlueCatalystApplications2026
 // @grant        none
 // ==/UserScript==
@@ -10,18 +10,28 @@
   "use strict"
 
   const CONFIG = {
-    debug: true,
+    debug: false,
     defaultTimeoutMs: 15000,
+    pollEveryMs: 200,
   }
 
-  // Edit this list to add/remove actions
   const WORKFLOW = [
-    { type: "click", selector: "button[data-next], button.cog-button--next" },
-    { type: "wait", ms: 5000 },
-    { type: "reload" },
+    { type: "click", selector: "#submitButton button" },
+    { type: "wait", ms: 1000 },
+    {
+      type: "run",
+      fn: async () => {
+        const element = document.getElementsByClassName("view-thumb")[0]
+        if (!element) throw new Error("Missing element: .view-thumb[0]")
+        element.click()
+      },
+    },
+    { type: "wait", ms: 1000 },
+    { type: "click", selector: "#show-heat-map" },
+    { type: "wait", ms: 1000 },
   ]
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
   const log = (...args) => {
     if (CONFIG.debug) console.log("[auto-workflow]", ...args)
@@ -29,93 +39,99 @@
 
   const isVisible = (el) => {
     if (!el) return false
-    const s = window.getComputedStyle(el)
-    const r = el.getBoundingClientRect()
+    const style = window.getComputedStyle(el)
+    const rect = el.getBoundingClientRect()
     return (
-      s.display !== "none" &&
-      s.visibility !== "hidden" &&
-      +s.opacity > 0 &&
-      r.width > 0 &&
-      r.height > 0
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      +style.opacity > 0 &&
+      rect.width > 0 &&
+      rect.height > 0
     )
   }
 
-  async function waitForSelector(
-    selector,
-    timeoutMs = CONFIG.defaultTimeoutMs,
-  ) {
+  async function waitForSelector(selector, timeoutMs = CONFIG.defaultTimeoutMs) {
     const start = Date.now()
+
     while (Date.now() - start < timeoutMs) {
-      const nodes = [...document.querySelectorAll(selector)]
-      const el = nodes.find((n) => isVisible(n) && !n.disabled)
-      if (el) return el
-      await sleep(200)
+      const elements = [...document.querySelectorAll(selector)]
+      const found = elements.find((el) => isVisible(el) && !el.disabled)
+      if (found) return found
+      await sleep(CONFIG.pollEveryMs)
     }
+
     throw new Error(`Timeout waiting for selector: ${selector}`)
   }
 
+  async function waitForStepContent(step, timing) {
+    const key = timing === "before" ? "waitForSelectorBefore" : "waitForSelectorAfter"
+    if (!step[key]) return
+
+    const timeoutMs = step.waitTimeoutMs ?? step.timeoutMs ?? CONFIG.defaultTimeoutMs
+    await waitForSelector(step[key], timeoutMs)
+    log(`content ready (${timing})`, step[key])
+  }
+
   async function clickSelector(selector, timeoutMs) {
-    const el = await waitForSelector(selector, timeoutMs)
-    el.scrollIntoView({ block: "center", inline: "center" })
-    el.click()
+    const element = await waitForSelector(selector, timeoutMs)
+    element.scrollIntoView({ block: "center", inline: "center" })
+    element.click()
     log("clicked", selector)
   }
 
-  async function clickText(
-    selector,
-    text,
-    timeoutMs = CONFIG.defaultTimeoutMs,
-  ) {
+  async function clickText(selector, text, timeoutMs = CONFIG.defaultTimeoutMs) {
     const start = Date.now()
-    const wanted = text.trim().toLowerCase()
+    const wantedText = text.trim().toLowerCase()
 
     while (Date.now() - start < timeoutMs) {
-      const nodes = [...document.querySelectorAll(selector)]
-      const el = nodes.find((n) => {
-        if (!isVisible(n) || n.disabled) return false
-        const t = (n.textContent || n.innerText || "").trim().toLowerCase()
-        return t === wanted || t.includes(wanted)
+      const elements = [...document.querySelectorAll(selector)]
+      const found = elements.find((el) => {
+        if (!isVisible(el) || el.disabled) return false
+        const current = (el.textContent || el.innerText || "").trim().toLowerCase()
+        return current === wantedText || current.includes(wantedText)
       })
 
-      if (el) {
-        el.scrollIntoView({ block: "center", inline: "center" })
-        el.click()
+      if (found) {
+        found.scrollIntoView({ block: "center", inline: "center" })
+        found.click()
         log("clicked by text", selector, text)
         return
       }
 
-      await sleep(200)
+      await sleep(CONFIG.pollEveryMs)
     }
 
     throw new Error(`Timeout waiting text "${text}" in selector: ${selector}`)
   }
 
   async function fillInput(selector, value, timeoutMs) {
-    const el = await waitForSelector(selector, timeoutMs)
-    el.focus()
-    el.value = value
-    el.dispatchEvent(new Event("input", { bubbles: true }))
-    el.dispatchEvent(new Event("change", { bubbles: true }))
-    log("filled", selector, value)
+    const element = await waitForSelector(selector, timeoutMs)
+    element.focus()
+    element.value = value
+    element.dispatchEvent(new Event("input", { bubbles: true }))
+    element.dispatchEvent(new Event("change", { bubbles: true }))
+    log("filled", selector)
   }
 
   async function runStep(step) {
+    await waitForStepContent(step, "before")
+
     switch (step.type) {
       case "wait":
         await sleep(step.ms || 0)
-        return
+        break
 
       case "click":
         await clickSelector(step.selector, step.timeoutMs)
-        return
+        break
 
       case "clickText":
         await clickText(step.selector, step.text, step.timeoutMs)
-        return
+        break
 
       case "fill":
         await fillInput(step.selector, step.value ?? "", step.timeoutMs)
-        return
+        break
 
       case "reload":
         if (step.delayMs) await sleep(step.delayMs)
@@ -125,11 +141,13 @@
 
       case "run":
         if (typeof step.fn === "function") await step.fn()
-        return
+        break
 
       default:
         throw new Error(`Unknown step type: ${step.type}`)
     }
+
+    await waitForStepContent(step, "after")
   }
 
   async function runWorkflow() {
@@ -137,23 +155,17 @@
       for (const step of WORKFLOW) {
         await runStep(step)
       }
-    } catch (err) {
-      console.error("[auto-workflow] failed:", err)
+    } catch (error) {
+      console.error("[auto-workflow] failed:", error)
     }
   }
 
-  // avoid duplicate run in same page lifecycle
   if (window.__AUTO_WORKFLOW_RUNNING__) return
   window.__AUTO_WORKFLOW_RUNNING__ = true
 
-  if (
-    document.readyState === "complete" ||
-    document.readyState === "interactive"
-  ) {
+  if (document.readyState === "complete" || document.readyState === "interactive") {
     void runWorkflow()
   } else {
-    window.addEventListener("DOMContentLoaded", () => void runWorkflow(), {
-      once: true,
-    })
+    window.addEventListener("DOMContentLoaded", () => void runWorkflow(), { once: true })
   }
 })()
