@@ -6,9 +6,12 @@
 // @grant        none
 // ==/UserScript==
 
-;(() => {
+;(function () {
   "use strict"
 
+  /***********************
+   * CONFIG
+   ***********************/
   const CONFIG = {
     debug: false,
     defaultTimeoutMs: 15000,
@@ -27,11 +30,21 @@
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-  const log = (...args) => {
-    if (CONFIG.debug) console.log("[auto-workflow]", ...args)
+  async function waitFor(
+    predicateFn,
+    timeoutMs = CONFIG.stepTimeoutMs,
+    intervalMs = CONFIG.pollIntervalMs,
+  ) {
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      const val = predicateFn()
+      if (val) return val
+      await sleep(intervalMs)
+    }
+    throw new Error("Timeout waiting for condition.")
   }
 
-  const isVisible = (el) => {
+  function isVisible(el) {
     if (!el) return false
     const style = window.getComputedStyle(el)
     const rect = el.getBoundingClientRect()
@@ -42,6 +55,9 @@
       rect.width > 0 &&
       rect.height > 0
     )
+      return false
+    const rect = el.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0
   }
 
   async function waitForSelector(selector, timeoutMs = CONFIG.defaultTimeoutMs) {
@@ -91,8 +107,8 @@
         if (typeof step.fn === "function") await step.fn()
         break
 
-      default:
-        throw new Error(`Unknown step type: ${step.type}`)
+      // reload interrupts execution; this line won't execute in practice
+      await sleep(1e9)
     }
   }
 
