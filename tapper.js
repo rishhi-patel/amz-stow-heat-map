@@ -20,6 +20,7 @@
   const SHOW_HEAT_MAP_SELECTOR = "#show-heat-map, [id=' show-heat-map']"
 
   const WORKFLOW = [
+    { type: "run", fn: () => configureFirstStepOptions() },
     { type: "click", selector: "#submitButton button" },
     { type: "click", selector: ".view-thumb" },
     { type: "click", selector: SHOW_HEAT_MAP_SELECTOR },
@@ -73,6 +74,29 @@
     if (tab3) tab3.style.display = "block"
 
     log("made tabs visible", { tab2: !!tab2, tab3: !!tab3 })
+  }
+
+  function configureFirstStepOptions() {
+    const floorOne = document.querySelector('input[name="floor"][value="1"]')
+    if (floorOne && !floorOne.checked) {
+      floorOne.click()
+      log("clicked floor 1")
+    }
+
+    const groupBinsSelect = document.getElementById("group-bins")
+    const aisleOption = groupBinsSelect?.querySelector('option[value="Aisle"]')
+    if (groupBinsSelect && aisleOption) {
+      aisleOption.selected = true
+      const changeEvent = new Event("change", { bubbles: true })
+      groupBinsSelect.dispatchEvent(changeEvent)
+      log("set group-bins to Aisle")
+    }
+
+    const lockedNoButton = document.getElementById("lockedNo")
+    if (lockedNoButton) {
+      lockedNoButton.click()
+      log("clicked lockedNo")
+    }
   }
 
   async function runStep(step) {
