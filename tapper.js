@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Workflow Auto Runner
 // @namespace    local-automation
-// @version      1.5.0
+// @version      1.6.0
 // @match        https://www.cognitoforms.com/HATCHBlue1/BlueCatalystApplications2026
 // @grant        none
 // ==/UserScript==
@@ -15,7 +15,6 @@
     pollEveryMs: 200,
     stepDelayMs: 1000,
     loopEveryMs: 10000,
-    sessionTabKey: "tab",
   }
 
   const SHOW_HEAT_MAP_SELECTOR = "#show-heat-map, [id=' show-heat-map']"
@@ -24,7 +23,7 @@
     { type: "click", selector: "#submitButton button" },
     { type: "click", selector: ".view-thumb" },
     { type: "click", selector: SHOW_HEAT_MAP_SELECTOR },
-    { type: "run", fn: () => clickTabFromSessionOrPrompt() },
+    { type: "run", fn: () => showOtherTabs() },
   ]
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -66,29 +65,14 @@
     log("clicked", selector)
   }
 
-  function resolveTabValue() {
-    const rawTab = sessionStorage.getItem(CONFIG.sessionTabKey)
-    const tab = String(rawTab || "").trim()
+  function showOtherTabs() {
+    const tab2 = document.getElementById("ui-id-2")
+    const tab3 = document.getElementById("ui-id-3")
 
-    if (["1", "2", "3"].includes(tab)) {
-      return tab
-    }
+    if (tab2) tab2.style.display = "block"
+    if (tab3) tab3.style.display = "block"
 
-    const promptValue = window.prompt("Enter tab value (1, 2, or 3):", "1")
-    const normalized = String(promptValue || "").trim()
-
-    if (!["1", "2", "3"].includes(normalized)) {
-      throw new Error(`Invalid tab value: '${normalized || "(empty)"}'`)
-    }
-
-    sessionStorage.setItem(CONFIG.sessionTabKey, normalized)
-    return normalized
-  }
-
-  async function clickTabFromSessionOrPrompt() {
-    const tab = resolveTabValue()
-    const tabSelector = `#ui-id-${tab}`
-    await clickSelector(tabSelector)
+    log("made tabs visible", { tab2: !!tab2, tab3: !!tab3 })
   }
 
   async function runStep(step) {

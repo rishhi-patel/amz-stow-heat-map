@@ -5,19 +5,18 @@ This userscript now runs your requested actions in a fixed order:
 1. `document.querySelector("#submitButton button").click()`
 2. `document.getElementsByClassName("view-thumb")[0].click()`
 3. `document.getElementById("show-heat-map").click()`
-4. Click one tab based on session value (`ui-id-1` / `ui-id-2` / `ui-id-3`)
+4. Reveal tabs `#ui-id-2` and `#ui-id-3` by setting `style.display = "block"`
 
 The full workflow waits 10 seconds after completion, then refreshes the page to start again.
 
-## Session-based tab click
+## Tab visibility behavior
 
-The script reads session storage key `tab`.
+After the heat map button is clicked, the script reveals tabs `#ui-id-2` and `#ui-id-3` by setting:
 
-- `tab = "1"` → click `#ui-id-1`
-- `tab = "2"` → click `#ui-id-2`
-- `tab = "3"` → click `#ui-id-3`
+- `document.getElementById("ui-id-2").style.display = "block"`
+- `document.getElementById("ui-id-3").style.display = "block"`
 
-If `tab` is missing or not `1/2/3`, the tab step is skipped.
+This removes the need for session storage tab values and tab-selection prompts.
 
 ## Config
 
@@ -28,7 +27,6 @@ const CONFIG = {
   pollEveryMs: 200,
   stepDelayMs: 1000,
   loopEveryMs: 10000,
-  sessionTabKey: "tab",
 }
 ```
 
@@ -37,7 +35,6 @@ const CONFIG = {
 - `pollEveryMs`: selector polling interval.
 - `stepDelayMs`: delay between workflow steps.
 - `loopEveryMs`: delay before the page refreshes to start the workflow again.
-- `sessionTabKey`: session storage key used for the tab value.
 
 ## Notes
 
