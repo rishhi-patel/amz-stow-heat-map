@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Workflow Auto Runner
 // @namespace    local-automation
-// @version      1.3.0
+// @version      1.4.0
 // @match        https://www.cognitoforms.com/HATCHBlue1/BlueCatalystApplications2026
 // @grant        none
 // ==/UserScript==
@@ -14,6 +14,7 @@
     defaultTimeoutMs: 15000,
     pollEveryMs: 200,
     stepDelayMs: 1000,
+    loopEveryMs: 10000,
     sessionTabKey: "tab",
   }
 
@@ -118,9 +119,32 @@
   if (window.__AUTO_WORKFLOW_RUNNING__) return
   window.__AUTO_WORKFLOW_RUNNING__ = true
 
+  let isWorkflowRunning = false
+
+  async function runWorkflowSafely() {
+    if (isWorkflowRunning) {
+      log("previous run still in progress, skipping this interval")
+      return
+    }
+
+    isWorkflowRunning = true
+    try {
+      await runWorkflow()
+    } finally {
+      isWorkflowRunning = false
+    }
+  }
+
+  function startWorkflowLoop() {
+    void runWorkflowSafely()
+    window.setInterval(() => {
+      void runWorkflowSafely()
+    }, CONFIG.loopEveryMs)
+  }
+
   if (document.readyState === "complete" || document.readyState === "interactive") {
-    void runWorkflow()
+    startWorkflowLoop()
   } else {
-    window.addEventListener("DOMContentLoaded", () => void runWorkflow(), { once: true })
+    window.addEventListener("DOMContentLoaded", () => startWorkflowLoop(), { once: true })
   }
 })()

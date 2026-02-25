@@ -4,8 +4,10 @@ This userscript now runs your requested actions in a fixed order:
 
 1. `document.querySelector("#submitButton button").click()`
 2. `document.getElementsByClassName("view-thumb")[0].click()`
-3. Click one tab based on session value (`ui-id-1` / `ui-id-2` / `ui-id-3`)
-4. `document.getElementById("show-heat-map").click()`
+3. `document.getElementById("show-heat-map").click()`
+4. Click one tab based on session value (`ui-id-1` / `ui-id-2` / `ui-id-3`)
+
+The full workflow loops every 10 seconds.
 
 ## Session-based tab click
 
@@ -24,6 +26,8 @@ const CONFIG = {
   debug: false,
   defaultTimeoutMs: 15000,
   pollEveryMs: 200,
+  stepDelayMs: 1000,
+  loopEveryMs: 10000,
   sessionTabKey: "tab",
 }
 ```
@@ -31,6 +35,8 @@ const CONFIG = {
 - `debug`: enable logs.
 - `defaultTimeoutMs`: selector wait timeout.
 - `pollEveryMs`: selector polling interval.
+- `stepDelayMs`: delay between workflow steps.
+- `loopEveryMs`: delay before the workflow starts again.
 - `sessionTabKey`: session storage key used for the tab value.
 
 ## Notes
