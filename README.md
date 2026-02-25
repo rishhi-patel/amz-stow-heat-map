@@ -7,7 +7,7 @@ This userscript now runs your requested actions in a fixed order:
 3. `document.getElementById("show-heat-map").click()`
 4. Click one tab based on session value (`ui-id-1` / `ui-id-2` / `ui-id-3`)
 
-The full workflow loops every 10 seconds.
+The full workflow waits 10 seconds after completion, then refreshes the page to start again.
 
 ## Session-based tab click
 
@@ -36,7 +36,7 @@ const CONFIG = {
 - `defaultTimeoutMs`: selector wait timeout.
 - `pollEveryMs`: selector polling interval.
 - `stepDelayMs`: delay between workflow steps.
-- `loopEveryMs`: delay before the workflow starts again.
+- `loopEveryMs`: delay before the page refreshes to start the workflow again.
 - `sessionTabKey`: session storage key used for the tab value.
 
 ## Notes
